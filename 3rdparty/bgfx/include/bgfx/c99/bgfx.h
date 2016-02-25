@@ -480,7 +480,7 @@ BGFX_C_API bool bgfx_init(bgfx_renderer_type_t _type, uint16_t _vendorId, uint16
 BGFX_C_API void bgfx_shutdown();
 
 /**/
-BGFX_C_API void bgfx_reset(uint32_t _width, uint32_t _height, uint32_t _flags);
+BGFX_C_API void bgfx_reset(uint32_t _width, uint32_t _height, uint32_t _refresh, uint32_t _interlace, uint32_t _flags);
 
 /**/
 BGFX_C_API uint32_t bgfx_frame();

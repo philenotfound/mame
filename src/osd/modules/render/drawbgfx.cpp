@@ -119,7 +119,20 @@ int renderer_bgfx::create()
 		bgfx::sdlSetWindow(window().sdl_window());
 #endif
 		bgfx::init();
-		bgfx::reset(m_width[window().m_index], m_height[window().m_index], video_config.waitvsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE);
+
+		// only link window #0 to SwitchRes
+		if (window().m_index == 0)
+		{
+			m_switchres_mode = &window().machine().switchres.best_mode;
+			if (m_switchres_mode)
+			{
+				m_width[window().m_index] = m_switchres_mode->type & MODE_ROTATED? m_switchres_mode->height : m_switchres_mode->width;
+				m_height[window().m_index] = m_switchres_mode->type & MODE_ROTATED? m_switchres_mode->width : m_switchres_mode->height;
+				m_refresh = (int)m_switchres_mode->refresh;
+				m_interlace = m_switchres_mode->interlace;
+			}
+		}
+		bgfx::reset(m_width[window().m_index], m_height[window().m_index], m_refresh, m_interlace, (video_config.windowed? BGFX_RESET_NONE : BGFX_RESET_FULLSCREEN) | (video_config.waitvsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE));
 		// Enable debug text.
 		bgfx::setDebug(BGFX_DEBUG_TEXT); //BGFX_DEBUG_STATS
 		m_dimensions = osd_dim(m_width[0], m_height[0]);
@@ -746,13 +759,14 @@ int renderer_bgfx::draw(int update)
 	int index = window().m_index;
 	// Set view 0 default viewport.
 	osd_dim wdim = window().get_size();
-	m_width[index] = wdim.width();
-	m_height[index] = wdim.height();
+	m_width[index] = index == 0? (m_switchres_mode->type & MODE_ROTATED? m_switchres_mode->height : m_switchres_mode->width) : wdim.width();
+	m_height[index] = index == 0? (m_switchres_mode->type & MODE_ROTATED? m_switchres_mode->width : m_switchres_mode->height) : wdim.height();
+
 	if (index == 0)
 	{
 		if ((m_dimensions != osd_dim(m_width[index], m_height[index])))
 		{
-			bgfx::reset(m_width[index], m_height[index], video_config.waitvsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE);
+			bgfx::reset(m_width[index], m_height[index], m_refresh, m_interlace, (video_config.windowed? BGFX_RESET_NONE : BGFX_RESET_FULLSCREEN) | (video_config.waitvsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE));
 			m_dimensions = osd_dim(m_width[index], m_height[index]);
 		}
 	}
@@ -760,7 +774,7 @@ int renderer_bgfx::draw(int update)
 	{
 		if ((m_dimensions != osd_dim(m_width[index], m_height[index])))
 		{
-			bgfx::reset(window().m_main->get_size().width(), window().m_main->get_size().height(), video_config.waitvsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE);
+			bgfx::reset(window().m_main->get_size().width(), window().m_main->get_size().height(), m_refresh, m_interlace, (video_config.windowed? BGFX_RESET_NONE : BGFX_RESET_FULLSCREEN) | (video_config.waitvsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE));
 			delete m_framebuffer;
 #ifdef OSD_WINDOWS
 			m_framebuffer = m_targets->create_target("backbuffer", window().m_hwnd, m_width[index], m_height[index]);

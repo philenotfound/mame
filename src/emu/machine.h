@@ -255,6 +255,9 @@ public:
 	// debugger-related information
 	UINT32                  debug_flags;        // the current debug flags
 
+	// SwitchRes patch
+	switchres_manager       switchres;			// SwitchRes data
+
 	// internal core information
 	debugcpu_private *      debugcpu_data;      // internal data from debugcpu.c
 

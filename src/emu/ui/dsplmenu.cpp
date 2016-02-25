@@ -48,7 +48,7 @@ ui_menu_display_options::dspl_option ui_menu_display_options::m_options[] = {
 	{ 0, "Window Mode",              OSDOPTION_WINDOW },
 	{ 0, "Enforce Aspect Ratio",     OSDOPTION_KEEPASPECT },
 	{ 0, "Start Out Maximized",      OSDOPTION_MAXIMIZE },
-	{ 0, "Synchronized Refresh",     OSDOPTION_SYNCREFRESH },
+	{ 0, "Synchronized Refresh",     OPTION_SYNCREFRESH },
 	{ 0, "Wait Vertical Sync",       OSDOPTION_WAITVSYNC }
 };
 

@@ -197,6 +197,7 @@ namespace stl
 
 #define BGFX_DEFAULT_WIDTH  1280
 #define BGFX_DEFAULT_HEIGHT 720
+#define BGFX_DEFAULT_REFRESH 60
 
 #define BGFX_MAX_COMPUTE_BINDINGS 8
 
@@ -1327,12 +1328,16 @@ namespace bgfx
 		Resolution()
 			: m_width(BGFX_DEFAULT_WIDTH)
 			, m_height(BGFX_DEFAULT_HEIGHT)
+			, m_refresh(BGFX_DEFAULT_REFRESH)
+			, m_interlace(0)
 			, m_flags(BGFX_RESET_NONE)
 		{
 		}
 
 		uint32_t m_width;
 		uint32_t m_height;
+		uint32_t m_refresh;
+		uint32_t m_interlace;
 		uint32_t m_flags;
 	};
 
@@ -2122,7 +2127,7 @@ namespace bgfx
 			return cmdbuf;
 		}
 
-		BGFX_API_FUNC(void reset(uint32_t _width, uint32_t _height, uint32_t _flags) )
+		BGFX_API_FUNC(void reset(uint32_t _width, uint32_t _height, uint32_t _refresh, uint32_t _interlace, uint32_t _flags) )
 		{
 			BX_WARN(0 != _width && 0 != _height, "Frame buffer resolution width or height cannot be 0 (width %d, height %d).", _width, _height);
 			m_resolution.m_width  = bx::uint32_max(1, _width);

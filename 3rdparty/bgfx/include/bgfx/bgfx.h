@@ -798,7 +798,7 @@ namespace bgfx
 	///
 	/// @attention C99 equivalent is `bgfx_reset`.
 	///
-	void reset(uint32_t _width, uint32_t _height, uint32_t _flags = BGFX_RESET_NONE);
+	void reset(uint32_t _width, uint32_t _height, uint32_t _refresh, uint32_t interlace, uint32_t _flags = BGFX_RESET_NONE);
 
 	/// Advance to next frame. When using multithreaded renderer, this call
 	/// just swaps internal buffers, kicks render thread, and returns. In

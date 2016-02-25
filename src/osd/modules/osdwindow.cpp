@@ -47,6 +47,7 @@ osd_renderer* osd_renderer::make_for_type(int mode, osd_window* window, int extr
 		case VIDEO_MODE_GDI:
 			return new renderer_gdi(window);
 		case VIDEO_MODE_D3D:
+		case VIDEO_MODE_D3D9EX:
 		{
 			osd_renderer *renderer = new renderer_d3d9(window);
 			return renderer;

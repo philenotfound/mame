@@ -67,6 +67,7 @@ public:
 	void update();
 	void toggle_full_screen();
 	void modify_prescale(int dir);
+	void window_changeres(running_machine &machine);
 	void resize(INT32 width, INT32 height);
 	void destroy();
 
@@ -99,7 +100,6 @@ public:
 	int                 m_resize_height;
 	osd_ticks_t         m_last_resize;
 
-private:
 	// window handle and info
 	char                m_title[256];
 	int                 m_startmaximized;
@@ -108,7 +108,9 @@ private:
 	osd_dim             m_minimum_dim;
 	osd_dim             m_windowed_dim;
 
+private:
 	// rendering info
+	std::mutex          m_render_lock;
 	osd_event *         m_rendered_event;
 	render_target *     m_target;
 

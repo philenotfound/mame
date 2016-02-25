@@ -34,6 +34,7 @@ enum
 #endif
 	VIDEO_MODE_SDL2ACCEL,
 	VIDEO_MODE_D3D,
+	VIDEO_MODE_D3D9EX,
 	VIDEO_MODE_SOFT,
 
 	VIDEO_MODE_COUNT
@@ -237,6 +238,9 @@ public:
 	virtual bool sliders_dirty() { return m_sliders_dirty; }
 
 	static osd_renderer* make_for_type(int mode, osd_window *window, int extra_flags = FLAG_NONE);
+
+	// SwitchRes mode
+	modeline *          m_switchres_mode;
 
 protected:
 	/* Internal flags */

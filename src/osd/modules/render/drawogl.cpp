@@ -36,6 +36,14 @@
 #include "modules/opengl/gl_shader_tool.h"
 #include "modules/opengl/gl_shader_mgr.h"
 
+#ifdef SDLMAME_UNIX
+// DRM
+#include <xf86drm.h>
+#include <xf86drmMode.h>
+#include <fcntl.h>
+extern bool set_mame_focus(SDL_Window * window);
+#endif
+
 #if defined(SDLMAME_MACOSX)
 #ifndef APIENTRY
 #define APIENTRY
@@ -236,6 +244,10 @@ void renderer_ogl::set_blendmode(int blendmode)
 //  STATIC VARIABLES
 //============================================================
 
+#ifdef SDLMAME_UNIX
+static int drawogl_drm_open(void);
+#endif
+
 // OGL 1.3
 #ifdef GL_ARB_multitexture
 static PFNGLACTIVETEXTUREARBPROC pfn_glActiveTexture    = nullptr;
@@ -277,6 +289,9 @@ static void texture_set_data(ogl_texture_info *texture, const render_texinfo *te
 bool renderer_ogl::s_shown_video_info = false;
 bool renderer_ogl::s_dll_loaded = false;
 
+// Fixme: need to find a better way to make fd available to window.cpp
+int fd = 0;
+
 bool renderer_ogl::init(running_machine &machine)
 {
 	s_dll_loaded = false;
@@ -286,6 +301,11 @@ bool renderer_ogl::init(running_machine &machine)
 	osd_printf_verbose("Using Windows OpenGL driver\n");
 #else
 	osd_printf_verbose("Using SDL multi-window OpenGL driver (SDL 2.0+)\n");
+#endif
+
+#ifdef SDLMAME_UNIX
+	// Try to open DRM device
+	fd = drawogl_drm_open();
 #endif
 
 	return false;
@@ -572,7 +592,7 @@ int renderer_ogl::create()
 		osd_printf_error("%s\n", m_gl_context->LastErrorMsg());
 		return 1;
 	}
-	m_gl_context->SetSwapInterval(video_config.waitvsync ? 1 : 0);
+	m_gl_context->SetSwapInterval((video_config.waitvsync && fd == 0) ? 1 : 0);
 
 
 	m_blittimer = 0;
@@ -599,6 +619,25 @@ int renderer_ogl::create()
 	return 0;
 }
 
+#ifdef SDLMAME_UNIX
+//============================================================
+//  drawogl_drm_open
+//============================================================
+
+static int drawogl_drm_open(void)
+{
+	const char *node = {"/dev/dri/card0"};
+
+	fd = open(node, O_RDWR | O_CLOEXEC);
+	if (fd < 0)
+	{
+		fprintf(stderr, "cannot open %s\n", node);
+		return 0;
+	}
+	osd_printf_verbose("%s successfully opened\n", node);
+	return fd;
+}
+#endif
 
 //============================================================
 //  drawsdl_xy_to_render_target
@@ -1379,6 +1418,19 @@ int renderer_ogl::draw(const int update)
 	window().m_primlist->release_lock();
 	m_init_context = 0;
 
+#ifdef SDLMAME_UNIX
+	// wait for vertical retrace
+	if (video_config.waitvsync && fd)
+	{
+		drmVBlank vbl;
+		memset(&vbl, 0, sizeof(vbl));
+		vbl.request.type = DRM_VBLANK_RELATIVE;
+		vbl.request.sequence = 1;
+		if (drmWaitVBlank(fd, &vbl) != 0)
+			osd_printf_verbose("drmWaitVBlank failed\n");
+	}
+#endif
+
 	m_gl_context->SwapBuffer();
 
 	return 0;
@@ -1602,6 +1654,7 @@ void renderer_ogl::texture_compute_size_type(const render_texinfo *texsource, og
 	texture->rawwidth_create = finalwidth_create;
 	texture->rawheight_create = finalheight_create;
 }
+
 
 //============================================================
 //  texture_create
@@ -2659,6 +2712,9 @@ ogl_texture_info * renderer_ogl::texture_update(const render_primitive *prim, in
 	if (texture == nullptr && prim->texture.base != nullptr)
 	{
 		texture = texture_create(&prim->texture, prim->flags);
+#ifdef SDLMAME_UNIX
+	        set_mame_focus(window().sdl_window());
+#endif
 	}
 	else if (texture != nullptr)
 	{

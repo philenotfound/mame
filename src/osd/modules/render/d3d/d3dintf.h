@@ -75,6 +75,7 @@ struct present_parameters
 	DWORD Flags;
 	UINT FullScreen_RefreshRateInHz;
 	UINT PresentationInterval;
+	BOOL Interlaced;
 };
 
 
@@ -158,7 +159,7 @@ struct d3d_device_interface
 	HRESULT (*get_render_target_data)(device *dev, surface *rendertarget, surface *destsurface);
 	HRESULT (*present)(device *dev, const RECT *source, const RECT *dest, HWND override, RGNDATA *dirty, DWORD flags);
 	ULONG   (*release)(device *dev);
-	HRESULT (*reset)(device *dev, present_parameters *params);
+	HRESULT (*reset)(d3d_base* d3dintf, device *dev, present_parameters *params);
 	void    (*set_gamma_ramp)(device *dev, DWORD flags, const D3DGAMMARAMP *ramp);
 	HRESULT (*set_render_state)(device *dev, D3DRENDERSTATETYPE state, DWORD value);
 	HRESULT (*set_render_target)(device *dev, DWORD index, surface *surf);
@@ -167,7 +168,7 @@ struct d3d_device_interface
 	HRESULT (*set_texture_stage_state)(device *dev, DWORD stage, D3DTEXTURESTAGESTATETYPE state, DWORD value);
 	HRESULT (*set_vertex_format)(device *dev, D3DFORMAT format);
 	HRESULT (*stretch_rect)(device *dev, surface *source, const RECT *srcrect, surface *dest, const RECT *dstrect, D3DTEXTUREFILTERTYPE filter);
-	HRESULT (*test_cooperative_level)(device *dev);
+	HRESULT (*test_cooperative_level)(d3d_base* d3dintf, device *dev);
 };
 
 
@@ -218,6 +219,7 @@ struct d3d_base
 	int                         version;
 	void *                      d3dobj;
 	HINSTANCE                   dllhandle;
+	bool                        d3d9ex_available;
 	bool                        post_fx_available;
 	HINSTANCE                   libhandle;
 
@@ -234,6 +236,6 @@ struct d3d_base
 //  PROTOTYPES
 //============================================================
 
-d3d_base *drawd3d9_init(void);
+d3d_base *drawd3d9_init(bool);
 
 #endif

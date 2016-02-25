@@ -38,6 +38,12 @@ function maintargetosdoptions(_target,_subtarget)
 		}
 	end
 
+	if BASE_TARGETOS=="unix" and _OPTIONS["targetos"]=="linux" then
+		local str = backtick("pkg-config --libs libdrm")
+		addlibfromstring(str)
+		addoptionsfromstring(str)		
+	end
+
 	if BASE_TARGETOS=="unix" and _OPTIONS["targetos"]~="macosx" then
 		links {
 			"SDL2_ttf",
@@ -404,6 +410,7 @@ project ("osd_" .. _OPTIONS["osd"])
 		MAME_DIR .. "src/osd/sdl/output.cpp",
 		MAME_DIR .. "src/osd/sdl/watchdog.cpp",
 		MAME_DIR .. "src/osd/sdl/watchdog.h",
+		MAME_DIR .. "src/osd/sdl/switchres_sdl.cpp",
 		MAME_DIR .. "src/osd/modules/render/drawsdl.cpp",
 	}
 	files {

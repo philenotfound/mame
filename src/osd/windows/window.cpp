@@ -35,6 +35,7 @@
 #if (USE_OPENGL)
 #include "modules/render/drawogl.h"
 #endif
+extern bool switchres_resolution_change(win_window_info *window);
 
 //============================================================
 //  PARAMETERS
@@ -64,6 +65,7 @@
 #define WM_USER_SET_MINSIZE             (WM_USER + 5)
 #define WM_USER_UI_TEMP_PAUSE           (WM_USER + 6)
 #define WM_USER_EXEC_FUNC               (WM_USER + 7)
+#define WM_USER_CHANGERES               (WM_USER + 8)
 
 
 
@@ -103,7 +105,12 @@ static DWORD last_update_time;
 
 static HANDLE ui_pause_event;
 static HANDLE window_thread_ready_event;
-
+static HANDLE blit_pending;
+static HANDLE blit_done;
+static DWORD blit_threadid;
+static int blitting_active;
+static BOOL blit_lock;
+static BOOL blit_unlock;
 
 
 //============================================================
@@ -112,6 +119,7 @@ static HANDLE window_thread_ready_event;
 
 
 static void create_window_class(void);
+static DWORD WINAPI blit_loop(LPVOID lpParameter);
 
 // temporary hacks
 #if LOG_THREADS
@@ -244,6 +252,7 @@ bool windows_osd_interface::window_init()
 				fatalerror("SDL2-Accel renderer unavailable on Windows OSD.");
 				break;
 			case VIDEO_MODE_D3D:
+			case VIDEO_MODE_D3D9EX:
 				error = renderer_d3d9::init(machine());
 				break;
 			case VIDEO_MODE_SOFT:
@@ -342,10 +351,23 @@ void windows_osd_interface::window_exit()
 			break;
 #endif
 		case VIDEO_MODE_D3D:
+		case VIDEO_MODE_D3D9EX:
 			renderer_d3d9::exit();
 			break;
 		default:
 			break;
+	}
+
+	// end blitting thread
+	if (multithreading_enabled)
+	{
+		blitting_active = FALSE;
+		WaitForSingleObject(blit_done, 100);
+		if (blit_done)
+			CloseHandle (blit_done);
+		if (blit_pending)
+			CloseHandle (blit_pending);
+		osd_printf_verbose("Blitting thread destroyed\n");
 	}
 
 	// if we're multithreaded, clean up the window thread
@@ -806,6 +828,22 @@ void win_window_info::create(running_machine &machine, int index, osd_monitor_in
 	// handle error conditions
 	if (window->m_init_state == -1)
 		fatalerror("Unable to complete window creation\n");
+
+	// only link window #0 to SwitchRes
+	if (index == 0)
+	{
+		// create blitting thread
+		if (multithreading_enabled)
+		{
+			osd_printf_verbose("Blitting thread created\n");
+			blitting_active = TRUE;
+			blit_lock = TRUE;
+			osd_printf_verbose("winwindow_video_window_create: blit_lock = TRUE\n");
+			blit_pending = CreateEvent(NULL, FALSE, FALSE, NULL);
+			blit_done = CreateEvent(NULL, FALSE, FALSE, NULL);
+			CreateThread (NULL, 0, blit_loop, (LPVOID)window, 0, &blit_threadid);
+		}
+	}
 }
 
 
@@ -837,6 +875,65 @@ void win_window_info::destroy()
 	machine().render().target_free(m_target);
 }
 
+//============================================================
+//  blit_loop
+//  (blitting thread)
+//============================================================
+
+static DWORD WINAPI blit_loop(LPVOID lpParameter)
+{
+	win_window_info *window = (win_window_info *)lpParameter;
+	bool m_throttled; 
+	osd_printf_verbose("Blitting thread started\n");
+
+	do {
+		WaitForSingleObject(blit_pending, INFINITE);
+		m_throttled = window->machine().video().throttled();
+		if (!blit_lock) window->draw_video_contents(NULL, FALSE);
+		if (m_throttled) SetEvent(blit_done);
+
+	} while (blitting_active);
+
+	osd_printf_verbose("Blitting thread ended\n");
+
+	return -1;
+}
+
+//============================================================
+//  blit_lock_set
+//  (window thread)
+//============================================================
+
+void blit_lock_set ()
+{
+	blit_lock = TRUE;
+	osd_printf_verbose("blit_lock = TRUE\n");
+	Sleep(20);
+}
+
+//============================================================
+//  blit_lock_reset
+//  (window thread)
+//============================================================
+
+void blit_lock_reset ()
+{
+	blit_unlock = TRUE;
+	osd_printf_verbose("blit_unlock = TRUE\n");
+}
+
+//============================================================
+//  blit_lock_release
+//  (window thread)
+//============================================================
+
+void blit_lock_release ()
+{
+	Sleep(20);
+	blit_unlock = FALSE;
+	blit_lock = FALSE;
+	osd_printf_verbose("blit_lock = FALSE\n");
+}
 
 
 //============================================================
@@ -874,17 +971,13 @@ void win_window_info::update()
 	}
 
 	// if we're visible and running and not in the middle of a resize, draw
-	if (m_hwnd != nullptr && m_target != nullptr && m_renderer != nullptr)
+	if ((!multithreading_enabled || !blit_lock) && m_hwnd != nullptr && m_target != nullptr && m_renderer != nullptr)
 	{
 		bool got_lock = true;
 
 		mtlog_add("winwindow_video_window_update: try lock");
 
-		// only block if we're throttled
-		if (machine().video().throttled() || timeGetTime() - last_update_time > 250)
-			m_render_lock.lock();
-		else
-			got_lock = m_render_lock.try_lock();
+		got_lock = m_render_lock.try_lock();
 
 		// only render if we were able to get the lock
 		if (got_lock)
@@ -896,14 +989,27 @@ void win_window_info::update()
 			// don't hold the lock; we just used it to see if rendering was still happening
 			m_render_lock.unlock();
 
+			// check resolution change
+			if (this->m_renderer->m_switchres_mode && video_config.switchres && this->machine().options().changeres() && this->machine().switchres.game.changeres)
+			{
+				switchres_resolution_change(this);
+				return;
+			}
+
 			// ensure the target bounds are up-to-date, and then get the primitives
 			primlist = m_renderer->get_primitives();
 
 			// post a redraw request with the primitive list as a parameter
 			last_update_time = timeGetTime();
 			mtlog_add("winwindow_video_window_update: PostMessage start");
-			if (multithreading_enabled)
-				PostMessage(m_hwnd, WM_USER_REDRAW, 0, (LPARAM)primlist);
+			if (this->m_renderer->m_switchres_mode && multithreading_enabled && video_config.mode != VIDEO_MODE_GDI)
+			{
+				this->m_primlist = primlist;
+				SetEvent(blit_pending);
+
+				if ((video_config.waitvsync && this->machine().video().throttled()))
+					WaitForSingleObject(blit_done, 1000);
+			}
 			else
 				SendMessage(m_hwnd, WM_USER_REDRAW, 0, (LPARAM)primlist);
 			mtlog_add("winwindow_video_window_update: PostMessage end");
@@ -1315,7 +1421,7 @@ int win_window_info::complete_create()
 		m_renderer = osd_renderer::make_for_type(video_config.mode, reinterpret_cast<osd_window *>(this));
 		if (m_renderer->create())
 			return 1;
-
+		else blit_lock_reset();
 		ShowWindow(m_hwnd, SW_SHOW);
 	}
 
@@ -1352,12 +1458,15 @@ LRESULT CALLBACK win_window_info::video_window_proc(HWND wnd, UINT message, WPAR
 		// paint: redraw the last bitmap
 		case WM_PAINT:
 		{
+			osd_printf_verbose("window_proc: WM_PAINT\n");
 			PAINTSTRUCT pstruct;
 			HDC hdc = BeginPaint(wnd, &pstruct);
 			window->draw_video_contents(hdc, TRUE);
 			if (window->win_has_menu())
 				DrawMenuBar(window->m_hwnd);
 			EndPaint(wnd, &pstruct);
+			if (blit_unlock) blit_lock_release();
+			osd_printf_verbose("window_proc: WM_PAINT:END\n");
 			break;
 		}
 
@@ -1468,6 +1577,7 @@ LRESULT CALLBACK win_window_info::video_window_proc(HWND wnd, UINT message, WPAR
 		case WM_SYSCOMMAND:
 		{
 			UINT16 cmd = wparam & 0xfff0;
+			osd_printf_verbose("window_proc: WM_SYSCOMMAND %d\n", (UINT32)cmd);
 
 			// prevent screensaver or monitor power events
 			if (cmd == SC_MONITORPOWER || cmd == SC_SCREENSAVE)
@@ -1486,6 +1596,9 @@ LRESULT CALLBACK win_window_info::video_window_proc(HWND wnd, UINT message, WPAR
 					window->maximize_window();
 				break;
 			}
+			else if (cmd == SC_MINIMIZE) blit_lock_set();
+			else if (cmd == SC_RESTORE) blit_lock_reset();
+
 			return DefWindowProc(wnd, message, wparam, lparam);
 		}
 
@@ -1504,6 +1617,8 @@ LRESULT CALLBACK win_window_info::video_window_proc(HWND wnd, UINT message, WPAR
 
 		// destroy: clean up all attached rendering bits and nullptr out our hwnd
 		case WM_DESTROY:
+			osd_printf_verbose("window_proc: WM_DESTROY\n");
+			blit_lock_set();
 			global_free(window->m_renderer);
 			window->m_renderer = nullptr;
 			window->m_hwnd = nullptr;
@@ -1530,7 +1645,22 @@ LRESULT CALLBACK win_window_info::video_window_proc(HWND wnd, UINT message, WPAR
 
 		// fullscreen set
 		case WM_USER_SET_FULLSCREEN:
+			osd_printf_verbose("window_proc: WM_USER_SET_FULLSCREEN\n");
+			blit_lock_set();
 			window->set_fullscreen(wparam);
+			osd_printf_verbose("window_proc: WM_USER_SET_FULLSCREEN_END\n");
+			break;
+
+		// Resolution change
+		case WM_USER_CHANGERES:
+			osd_printf_verbose("window_proc: WM_USER_CHANGERES\n");
+			if (video_config.mode != VIDEO_MODE_BGFX)
+			{
+				delete window->m_renderer;
+				window->m_renderer = nullptr;
+				window->m_renderer = reinterpret_cast<osd_renderer *>(osd_renderer::make_for_type(video_config.mode, reinterpret_cast<osd_window *>(window)));
+				if (!window->m_renderer->create()) blit_lock_reset();
+			}
 			break;
 
 		// minimum size set
@@ -1553,6 +1683,11 @@ LRESULT CALLBACK win_window_info::video_window_proc(HWND wnd, UINT message, WPAR
 			 */
 			window->m_monitor->refresh();
 			break;
+
+		case WM_NCACTIVATE:
+			osd_printf_verbose("window_proc: WM_NCACTIVATE\n");
+			if (window->m_fullscreen && !blit_lock && !IsIconic(window->m_hwnd)) blit_lock_set();
+			return DefWindowProc(wnd, message, wparam, lparam);
 
 		// set focus: if we're not the primary window, switch back
 		// commented out ATM because this prevents us from resizing secondary windows
@@ -2089,6 +2224,7 @@ void win_window_info::set_fullscreen(int fullscreen)
 		m_renderer = reinterpret_cast<osd_renderer *>(osd_renderer::make_for_type(video_config.mode, reinterpret_cast<osd_window *>(this)));
 		if (m_renderer->create())
 			exit(1);
+		else blit_lock_reset();
 	}
 
 	// ensure we're still adjusted correctly

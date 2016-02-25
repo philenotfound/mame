@@ -39,7 +39,6 @@
 #define SDLOPTION_SCALEMODE             "scalemode"
 
 #define SDLOPTION_WAITVSYNC             "waitvsync"
-#define SDLOPTION_SYNCREFRESH           "syncrefresh"
 #define SDLOPTION_KEYMAP                "keymap"
 #define SDLOPTION_KEYMAP_FILE           "keymap_file"
 
@@ -141,6 +140,7 @@ public:
 	// general overridables
 	virtual void init(running_machine &machine) override;
 	virtual void update(bool skip_redraw) override;
+	virtual void poll_input(void) override;
 
 	// input overridables
 	virtual void customize_input_type_list(simple_list<input_type_entry> &typelist) override;
@@ -161,12 +161,12 @@ public:
 	virtual void output_exit() override;
 	//virtual void midi_exit();
 
+	void extract_video_config();
+
 	sdl_options &options() { return m_options; }
 
 private:
 	virtual void osd_exit() override;
-
-	void extract_video_config();
 
 	sdl_options &m_options;
 

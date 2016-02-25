@@ -1102,6 +1102,7 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 					m_scd.BufferCount  = 1;
 					m_scd.OutputWindow = (HWND)g_platformData.nwh;
 					m_scd.Windowed     = true;
+					m_scd.Flags        = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
 
 					hr = m_factory->CreateSwapChain(m_device
 						, &m_scd
@@ -2217,6 +2218,7 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 
 			if (m_resolution.m_width  != _resolution.m_width
 			||  m_resolution.m_height != _resolution.m_height
+			||  m_resolution.m_refresh != _resolution.m_refresh
 			||  m_resolution.m_flags  != flags)
 			{
 				flags &= ~BGFX_RESET_INTERNAL_FORCE;
@@ -2256,6 +2258,16 @@ BX_PRAGMA_DIAGNOSTIC_POP();
 							, getBufferFormat()
 							, DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH
 							) );
+						
+						DXGI_MODE_DESC mode_desc = {0};
+						printf("renderer_d3d11: update resolution %d x %d\n", m_resolution.m_width, m_resolution.m_height);
+						mode_desc.Width  = m_resolution.m_width;
+						mode_desc.Height = m_resolution.m_height;
+						mode_desc.RefreshRate.Numerator = m_resolution.m_refresh;
+						mode_desc.RefreshRate.Denominator = 1;
+						mode_desc.ScanlineOrdering = m_resolution.m_interlace? DXGI_MODE_SCANLINE_ORDER_UPPER_FIELD_FIRST : DXGI_MODE_SCANLINE_ORDER_PROGRESSIVE;
+						m_swapChain->ResizeTarget(&mode_desc);
+						m_swapChain->SetFullscreenState((m_resolution.m_flags & BGFX_RESET_FULLSCREEN), NULL);
 					}
 					else
 					{

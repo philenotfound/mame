@@ -83,6 +83,9 @@
 
 sdl_window_info *sdl_window_list;
 
+extern bool switchres_resolution_change(sdl_window_info *window);
+// Fixme: need to find a better way to make fd available to window.cpp
+extern int fd;
 
 //============================================================
 //  LOCAL VARIABLES
@@ -405,8 +408,7 @@ osd_dim sdl_window_info::blit_surface_size()
 	osd_dim window_dim = get_size();
 
 	int newwidth, newheight;
-	int xscale = 1, yscale = 1;
-	float desired_aspect = 1.0f;
+	float xscale = 1, yscale = 1;
 	INT32 target_width = window_dim.width();
 	INT32 target_height = window_dim.height();
 
@@ -418,41 +420,17 @@ osd_dim sdl_window_info::blit_surface_size()
 	{
 		// make sure the monitor is up-to-date
 		m_target->compute_visible_area(target_width, target_height, m_monitor->aspect(), m_target->orientation(), target_width, target_height);
-		desired_aspect = (float)target_width / (float)target_height;
 	}
 
 	// non-integer scaling - often gives more pleasing results in full screen
 	if (!video_config.fullstretch)
 	{
-		// compute maximum integral scaling to fit the window
-		xscale = (target_width + 2) / newwidth;
-		yscale = (target_height + 2) / newheight;
-
-		// try a little harder to keep the aspect ratio if desired
-		if (video_config.keepaspect)
-		{
-			// if we could stretch more in the X direction, and that makes a better fit, bump the xscale
-			while (newwidth * (xscale + 1) <= window_dim.width() &&
-				better_mode(newwidth * xscale, newheight * yscale, newwidth * (xscale + 1), newheight * yscale, desired_aspect))
-				xscale++;
-
-			// if we could stretch more in the Y direction, and that makes a better fit, bump the yscale
-			while (newheight * (yscale + 1) <= window_dim.height() &&
-				better_mode(newwidth * xscale, newheight * yscale, newwidth * xscale, newheight * (yscale + 1), desired_aspect))
-				yscale++;
-
-			// now that we've maxed out, see if backing off the maximally stretched one makes a better fit
-			if (window_dim.width() - newwidth * xscale < window_dim.height() - newheight * yscale)
-			{
-				while (better_mode(newwidth * xscale, newheight * yscale, newwidth * (xscale - 1), newheight * yscale, desired_aspect) && (xscale >= 0))
-					xscale--;
-			}
-			else
-			{
-				while (better_mode(newwidth * xscale, newheight * yscale, newwidth * xscale, newheight * (yscale - 1), desired_aspect) && (yscale >= 0))
-					yscale--;
-			}
-		}
+		// Use SwitchRes scaling
+		float width = newwidth;
+		float height = newheight;
+		switchres_get_scale(m_target, target_width, target_height, width, height, xscale, yscale);
+		newwidth = width;
+		newheight = height;
 
 		// ensure at least a scale factor of 1
 		if (xscale <= 0) xscale = 1;
@@ -627,6 +605,23 @@ void sdl_window_info::modify_prescale(int dir)
 		machine().ui().popup_time(1, "Prescale %d", prescale());
 	}
 }
+
+void sdl_window_info::window_changeres(running_machine &machine)
+{
+#if (SDLMAME_SDL2)
+	if (this->fullscreen() && video_config.switchres)
+	{
+		execute_async_wait(&sdlwindow_video_window_destroy_wt, worker_param(this));
+		SDL_QuitSubSystem(SDL_INIT_VIDEO);
+		SDL_InitSubSystem(SDL_INIT_VIDEO);
+		execute_async_wait(&complete_create_wt, worker_param(this));
+	}
+#else
+	if (this->fullscreen() && video_config.switchres)
+		this->window_resize(window->minwidth, window->minheight);
+#endif
+}
+
 
 //============================================================
 //  sdlwindow_update_cursor_state
@@ -826,6 +821,14 @@ osd_dim sdl_window_info::pick_best_mode()
 	float size_score, best_score = 0.0f;
 	osd_dim ret(0,0);
 
+	// check if we already have a best mode
+	modeline *mode = &this->machine().switchres.best_mode;
+	if (mode->hactive)
+	{
+		ret = osd_dim(mode->type & MODE_ROTATED? mode->vactive : mode->hactive, mode->type & MODE_ROTATED? mode->hactive : mode->vactive);
+		return ret;
+	}
+
 	// determine the minimum width/height for the selected target
 	m_target->compute_minimum_size(minimum_width, minimum_height);
 
@@ -909,7 +912,12 @@ void sdl_window_info::update()
 
 		// see if the games video mode has changed
 		m_target->compute_minimum_size(tempwidth, tempheight);
-		if (osd_dim(tempwidth, tempheight) != m_minimum_dim)
+		if (video_config.switchres && m_fullscreen && machine().options().changeres() && machine().switchres.game.changeres)
+		{
+			switchres_resolution_change(this);
+			return;
+		}
+		else if (osd_dim(tempwidth, tempheight) != m_minimum_dim)
 		{
 			m_minimum_dim = osd_dim(tempwidth, tempheight);
 
@@ -925,20 +933,28 @@ void sdl_window_info::update()
 			}
 		}
 
-		if (video_config.waitvsync && video_config.syncrefresh)
-			event_wait_ticks = osd_ticks_per_second(); // block at most a second
-		else
-			event_wait_ticks = 0;
+		int got_lock = false;
+		got_lock = m_render_lock.try_lock();
 
-		if (osd_event_wait(m_rendered_event, event_wait_ticks))
+		// only render if we were able to get the lock
+		if (got_lock)
 		{
+			// don't hold the lock; we just used it to see if rendering was still happening
+			m_render_lock.unlock();
+
 			// ensure the target bounds are up-to-date, and then get the primitives
 
 			render_primitive_list &primlist = *m_renderer->get_primitives();
 
 			// and redraw now
-
+			osd_event_reset(m_rendered_event);
 			execute_async(&draw_video_contents_wt, worker_param(this, primlist));
+
+			if (video_config.waitvsync && machine().video().throttled())
+			{
+				event_wait_ticks = osd_ticks_per_second(); // block at most a second
+				osd_event_wait(m_rendered_event, event_wait_ticks);
+			}
 		}
 	}
 }
@@ -1194,7 +1210,7 @@ OSDWORK_CALLBACK( sdl_window_info::draw_video_contents_wt )
 	ASSERT_REDRAW_THREAD();
 
 	// Some configurations require events to be polled in the worker thread
-	sdlinput_process_events_buf();
+	//sdlinput_process_events_buf();
 
 	// Check whether window has vector screens
 

@@ -2466,11 +2466,11 @@ again:
 		g_allocator   = NULL;
 	}
 
-	void reset(uint32_t _width, uint32_t _height, uint32_t _flags)
+	void reset(uint32_t _width, uint32_t _height, uint32_t _refresh, uint32_t _interlace, uint32_t _flags)
 	{
 		BGFX_CHECK_MAIN_THREAD();
 		BX_CHECK(0 == (_flags&BGFX_RESET_RESERVED_MASK), "Do not set reset reserved flags!");
-		s_ctx->reset(_width, _height, _flags);
+		s_ctx->reset(_width, _height, _refresh, _interlace, _flags);
 	}
 
 	uint32_t frame()
@@ -3779,9 +3779,9 @@ BGFX_C_API void bgfx_shutdown()
 	return bgfx::shutdown();
 }
 
-BGFX_C_API void bgfx_reset(uint32_t _width, uint32_t _height, uint32_t _flags)
+BGFX_C_API void bgfx_reset(uint32_t _width, uint32_t _height, uint32_t _refresh, uint32_t _interlace, uint32_t _flags)
 {
-	bgfx::reset(_width, _height, _flags);
+	bgfx::reset(_width, _height, _refresh, _interlace, _flags);
 }
 
 BGFX_C_API uint32_t bgfx_frame()
